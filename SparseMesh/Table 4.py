@@ -58,5 +58,6 @@ for bar in bars2:
                 fontsize=FONT_TICK, color='#000', fontweight='bold')
 
 fig.tight_layout()
-plt.savefig('fig/table4.png', dpi=300, facecolor='white', bbox_inches='tight', pad_inches=0)
+plt.savefig('SparseMesh/fig/table4.png', dpi=300, facecolor='white', bbox_inches='tight', pad_inches=0)
 plt.close()
+

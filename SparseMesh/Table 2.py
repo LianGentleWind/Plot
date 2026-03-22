@@ -43,30 +43,31 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import numpy as np
+from matplotlib import rcParams
 
 # 1. 数据准备
 data_list = [
     ["7680MB", "Clos-N8",     1.00, 6,  20.02, "ms"],
-    ["7680MB", "Clos-N16",    1.00, 12, 20.03, "ms"],
     ["7680MB", "FullMesh-N8", 1.00, 6,  20.02, "ms"],
     ["7680MB", "SMesh-N8",    0.88, 6,  22.80, "ms"],
     ["7680MB", "SMesh-N13",   0.61, 6,  33.07, "ms"],
+    ["7680MB", "Clos-N16",    1.00, 12, 20.03, "ms"],
     ["7680MB", "SMesh-N16",   0.79, 12, 25.49, "ms"],
     ["7680MB", "SMesh-N31",   0.59, 12, 33.95, "ms"],
 
     ["60MB", "Clos-N8",     1.00, 6,  100.51, "µs"],
-    ["60MB", "Clos-N16",    0.99, 12, 101.20, "µs"],
     ["60MB", "FullMesh-N8", 1.00, 6,  100.01, "µs"],
     ["60MB", "SMesh-N8",    0.90, 6,  111.29, "µs"],
     ["60MB", "SMesh-N13",   0.72, 6,  139.13, "µs"],
+    ["60MB", "Clos-N16",    0.99, 12, 101.20, "µs"],
     ["60MB", "SMesh-N16",   0.81, 12, 123.12, "µs"],
     ["60MB", "SMesh-N31",   0.64, 12, 155.76, "µs"],
 
     ["300KB", "Clos-N8",     0.95, 6,  23.94, "µs"],
-    ["300KB", "Clos-N16",    0.94, 12, 24.32, "µs"],
     ["300KB", "FullMesh-N8", 1.00, 6,  22.76, "µs"],
     ["300KB", "SMesh-N8",    0.99, 6,  23.06, "µs"],
     ["300KB", "SMesh-N13",   0.97, 6,  23.51, "µs"],
+    ["300KB", "Clos-N16",    0.94, 12, 24.32, "µs"],
     ["300KB", "SMesh-N16",   0.97, 12, 23.46, "µs"],
     ["300KB", "SMesh-N31",   0.93, 12, 24.52, "µs"],
 ]
@@ -81,17 +82,17 @@ def calc_eff(row):
 df['RawEff'] = df.apply(calc_eff, axis=1)
 df['FinalScore'] = df.groupby('Traffic')['RawEff'].transform(lambda x: x / x.max())
 
-# 3. 绘图配置与美化（统一字体：标题14 坐标轴11）
-FONT_TITLE, FONT_AXIS, FONT_TICK = 14, 11, 11
+# 3. 绘图配置与美化 (统一字体)
+FONT_TITLE, FONT_AXIS, FONT_TICK = 14, 12, 12
 plt.rcParams['font.sans-serif'] = ['Arial']
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_theme(style="white")
 
-# 使用更加高级/低饱和的莫兰迪色系搭配
+# 莫兰迪色系搭配
 color_map = {
     'Clos': '#E6B85C',      # 暖黄色
     'FullMesh': '#6AB187',  # 灰绿色
-    'SMesh': '#517FA4'      # 雾霾蓝
+    'SMesh': '#517FA4'       # 雾霾蓝
 }
 
 def get_color(name):
@@ -101,10 +102,11 @@ def get_color(name):
 
 df['Color'] = df['Topology'].apply(get_color)
 
-# 4. 执行绘图: 三列三行
+# 4. 执行绘图: 三列三行, 优化布局
 traffic_types = ["7680MB", "60MB", "300KB"]
-fig, axes = plt.subplots(3, 3, figsize=(7, 8), sharey='row',
-                         gridspec_kw={'wspace': 0.05, 'hspace': 0.28, 'width_ratios': [1, 0.45, 1]})
+# 调整 width_ratios, 左右两列 bar chart 宽度一致
+fig, axes = plt.subplots(3, 3, figsize=(7.5, 8.2), sharey='row',
+                         gridspec_kw={'wspace': 0.05, 'hspace': 0.3, 'width_ratios': [1, 0.4, 1]})
 
 for i, traffic in enumerate(traffic_types):
     ax_time = axes[i, 0]   
@@ -114,37 +116,41 @@ for i, traffic in enumerate(traffic_types):
     subset = df[df['Traffic'] == traffic].copy()
     y_pos = np.arange(len(subset))
 
-    # --- 左列: Time ---
+    # --- 左列: Time (镜像翻转) ---
     bars_t = ax_time.barh(y_pos, subset['Time'],
                           color=subset['Color'], edgecolor='#000',
-                          linewidth=1.0, height=0.6, zorder=3)
+                          linewidth=0.5, height=0.6, zorder=3)
     time_unit = subset['TimeUnit'].iloc[0]
-    # 图(c)即第三行左列，xlim 设为 0, 35
-    if i == 0:
-        ax_time.set_xlim(0, 48)
-
-    elif i == 1:
-        ax_time.set_xlim(0, 220)
-
-    elif i == 2:
-        ax_time.set_xlim(0, 40)
-    else:
-        ax_time.set_xlim(0, subset['Time'].max() * 1.35)
-    ax_time.invert_yaxis()
     
-    # 标注数值
+    # 设定 X 轴范围并镜像翻转
+    if i == 0:   time_lim = 48
+    elif i == 1: time_lim = 220
+    else:        time_lim = 40
+    
+    ax_time.set_xlim(0, time_lim)
+    ax_time.invert_yaxis() # 保持拓扑顺序一致
+    ax_time.invert_xaxis() # 实现“背靠背”效果的核心：将 X 轴左右翻转
+
+    ax_time.axhline(2.5, color='#000', linewidth=1.0, linestyle='--', alpha=0.8, zorder=1)
+
+    # 标注数值 (调整对齐方式和位置)
+    max_time_in_subset = subset['Time'].max()
     for bar in bars_t:
         width = bar.get_width()
-        ax_time.text(width + subset['Time'].max() * 0.03, bar.get_y() + bar.get_height()/2, 
-                     f'{width:.2f} {time_unit}', ha='left', va='center', fontsize=FONT_TICK, color='#000')
+        # 计算偏离柱子末端的距离 (基于当前数据刻度)
+        offset_val = time_lim * 0.03 
+        # 在镜像坐标系中，柱子从右向左延伸，末端在视觉左侧。
+        # 标注位置需要计算在 width 加上一个偏移量 (数据值变大，视觉更偏左)。
+        # 并使用 right 对齐，让文字主体位于计算点的左侧，从而位于柱子外侧。
+        ax_time.text(width + offset_val, bar.get_y() + bar.get_height()/2, 
+                     f'{width:.2f} {time_unit}', ha='right', va='center', fontsize=FONT_TICK, color='#000')
     
     ax_time.tick_params(axis='y', which='both', left=False, labelleft=False)
     ax_time.tick_params(axis='x', labelsize=FONT_TICK, colors='#000')
-    
     for spine in ax_time.spines.values():
         spine.set_color('#000')
         
-    # --- 中间列: Topology (以及Traffic) ---
+    # --- 中间列: Topology ---
     for spine in ax_mid.spines.values():
         spine.set_visible(False)
     ax_mid.tick_params(axis='both', which='both', bottom=False, left=False, labelbottom=False, labelleft=False)
@@ -154,18 +160,20 @@ for i, traffic in enumerate(traffic_types):
     for y, topo in zip(y_pos, subset['Topology']):
         ax_mid.text(0.5, y, topo, ha='center', va='center', fontsize=FONT_AXIS, color='#000')
         
-    # 将 Traffic 标签移动到中间的 ax_mid 内的下方
+    # 绘制 Traffic 标签
     ax_mid.text(0.5, len(subset) + 0.3, f'Traffic: {traffic}', 
                  ha='center', va='center', fontsize=FONT_AXIS, fontweight='bold', 
                  color='#000', bbox=dict(facecolor='#FFE0E0', edgecolor='none', pad=4.0, alpha=0.9))
 
     # --- 右列: Port-Normalized Score ---
     bars_e = ax_eff.barh(y_pos, subset['FinalScore'],
-                         color=subset['Color'], edgecolor='#000',
-                         linewidth=1.0, height=0.6, zorder=3)
+                          color=subset['Color'], edgecolor='#000',
+                          linewidth=0.5, height=0.6, zorder=3)
     ax_eff.set_xlim(0, 1.25)
     ax_eff.set_xticks([0, 0.5, 1])
-    
+    ax_eff.axhline(2.5, color='#000', linewidth=1.0, linestyle='--', alpha=0.8, zorder=1)
+
+    # 标注数值
     for bar in bars_e:
         width = bar.get_width()
         ax_eff.text(width + 0.03, bar.get_y() + bar.get_height()/2, 
@@ -173,7 +181,6 @@ for i, traffic in enumerate(traffic_types):
     
     ax_eff.tick_params(axis='y', which='both', left=False, labelleft=False)
     ax_eff.tick_params(axis='x', labelsize=FONT_TICK, colors='#000')
-
     for spine in ax_eff.spines.values():
         spine.set_color('#000')
 
@@ -188,15 +195,23 @@ for i, traffic in enumerate(traffic_types):
         ax_time.set_xlabel('Time', fontsize=FONT_AXIS, labelpad=10, color='#000')
         ax_eff.set_xlabel('Efficiency Score', fontsize=FONT_AXIS, labelpad=10, color='#000')
 
-# 整体微调，去掉 constrained_layout() 导致的一些边距问题
-fig.subplots_adjust(left=0.02, right=0.98, top=0.90, bottom=0.08)
+# 整体微调
+fig.subplots_adjust(left=0.03, right=0.97, top=0.88, bottom=0.08)
 
-# 子图标号 (a)-(f)，仅条形图子图，跳过中间 Topology 列
-# 左列 Time、右列 Efficiency 各有3个，共6个子图
-subplot_axes = [axes[i, 0] for i in range(3)] + [axes[i, 2] for i in range(3)]
-for idx, ax in enumerate(subplot_axes):
-    ax.text(0.98, 0.98, f'({chr(ord("a") + idx)})', transform=ax.transAxes,
-            fontsize=FONT_TITLE, fontweight='bold', va='top', ha='right', zorder=10)
+# 子图标号 (a)-(f), 按行排序, (a,c,e)在左, (b,d,f)在右
+label_data = []
+char_code = ord('a')
+for row_idx in range(3):
+    # Time 列 (左)
+    label_data.append((axes[row_idx, 0], chr(char_code), 'left', 0.02))
+    char_code += 1
+    # Efficiency 列 (右)
+    label_data.append((axes[row_idx, 2], chr(char_code), 'right', 0.98))
+    char_code += 1
 
-plt.savefig('fig/table2.png', dpi=300, facecolor='white', bbox_inches='tight', pad_inches=0)
+for ax, label, align, x_pos in label_data:
+     ax.text(x_pos, 0.98, f'({label})', transform=ax.transAxes,
+            fontsize=FONT_TITLE, fontweight='bold', va='top', ha=align, zorder=10)
+
+plt.savefig('SparseMesh/fig/table2.png', dpi=300, facecolor='white', bbox_inches='tight', pad_inches=0.1)
 plt.close()
