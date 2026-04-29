@@ -129,6 +129,17 @@ for (model, tpot, seq_len), group in df.groupby(group_cols):
             color=color_map[hw_type],
             label=hw_type,
         )
+        for _, row in line_data.iterrows():
+            ax.annotate(
+                f"{row['single_card_throughput_tps']:.0f}",
+                xy=(row["supernode_size"], row["single_card_throughput_tps"]),
+                xytext=(0, 7),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=10,
+                color=color_map[hw_type],
+            )
 
     sizes = sorted(group["supernode_size"].unique())
     ax.set_xscale("log", base=2)
