@@ -308,6 +308,62 @@ def draw_op_bars_h(ax, records, subtitle, cum_starts, widths,
         ax.tick_params(axis='x', labelbottom=False)
 
 
+def draw_utilization_lines(ax, records, cum_starts, widths,
+                           divider_time=None, show_xticklabels=True):
+    """画 cube/vector 计算率折线图，与主时间线共享 X 轴。"""
+    n = len(records)
+    if n == 0:
+        ax.text(0.5, 0.5, '(no ops)', ha='center', va='center',
+                transform=ax.transAxes, fontsize=10, color='#888')
+        ax.set_yticks([])
+        ax.set_title('Compute Utilization', fontsize=11, pad=2)
+        return
+
+    total_width = cum_starts[-1] + widths[-1] if n > 0 else 1
+    x_centers = cum_starts + widths / 2
+    util = np.array([float(r.get('compute_utilization', 0) or 0)
+                     for r in records])
+    engines = [r['engine'] for r in records]
+    cube_util = np.array([util[i] if engines[i] == 'cube' else 0.0
+                          for i in range(n)])
+    vector_util = np.array([util[i] if engines[i] == 'vector' else 0.0
+                            for i in range(n)])
+
+    x_steps = np.repeat(np.r_[cum_starts, total_width], 2)[1:-1]
+    cube_steps = np.repeat(cube_util, 2)
+    vector_steps = np.repeat(vector_util, 2)
+
+    ax.plot(x_steps, cube_steps, color=BAR_COLORS['cube_compute'],
+            linewidth=1.0,
+            label='cube compute_utilization')
+    ax.plot(x_steps, vector_steps, color=BAR_COLORS['vector_compute'],
+            linewidth=1.0,
+            label='vector compute_utilization')
+
+    ax.set_xlim(0, total_width)
+    ymax = max(1.0, float(max(cube_util.max(), vector_util.max())) * 1.05)
+    ax.set_ylim(0, ymax)
+    ax.set_ylabel('utilization', fontsize=9)
+    ax.set_title('Compute Utilization', fontsize=11, pad=2)
+    ax.grid(axis='y', linestyle=':', linewidth=0.6, alpha=0.5)
+    ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
+
+    if divider_time is not None:
+        ax.axvline(divider_time, color=DIVIDER_COLOR,
+                   linestyle='--', linewidth=1.0, alpha=0.7)
+
+    if show_xticklabels:
+        for i, r in enumerate(records):
+            if widths[i] <= 0:
+                continue
+            ax.text(x_centers[i], -0.10 * ymax, r['name'],
+                    rotation=90, ha='center', va='top',
+                    fontsize=5, clip_on=False)
+        ax.set_xlabel('time (s)', fontsize=9)
+    else:
+        ax.tick_params(axis='x', labelbottom=False)
+
+
 # ----------------------------------------------------------------
 # 饼图
 # ----------------------------------------------------------------
@@ -380,43 +436,29 @@ def plot_timeline(records, stats_text, stats, output_path, title,
 
     # ---- 画布布局 ----
     fig = plt.figure(figsize=(22, 16))
-    outer_gs = fig.add_gridspec(2, 1, height_ratios=[3, 1.2], hspace=0.30)
+    outer_gs = fig.add_gridspec(3, 1, height_ratios=[2.1, 1.0, 1.2],
+                                hspace=0.18)
 
-    # 上部：3 行时间线
-    inner_gs = outer_gs[0].subgridspec(3, 1,
-                                        height_ratios=[1, 1, 1.4],
-                                        hspace=0.15)
-    ax_all    = fig.add_subplot(inner_gs[0])
-    ax_cube   = fig.add_subplot(inner_gs[1], sharex=ax_all)
-    ax_vector = fig.add_subplot(inner_gs[2], sharex=ax_all)
+    # 上部：单行时间线 + 计算率折线图
+    ax_all = fig.add_subplot(outer_gs[0])
+    ax_util = fig.add_subplot(outer_gs[1], sharex=ax_all)
 
     # 下部：文本 + 饼图
-    bottom_gs = outer_gs[1].subgridspec(1, 2, width_ratios=[1.5, 1.0],
+    bottom_gs = outer_gs[2].subgridspec(1, 2, width_ratios=[1.5, 1.0],
                                          wspace=0.18)
     ax_text = fig.add_subplot(bottom_gs[0])
     ax_pie  = fig.add_subplot(bottom_gs[1])
 
     bar_h = 1.0
 
-    # 统计 cube / vector 算子数量
-    n_cube   = sum(1 for r in records if r['engine'] == 'cube')
-    n_vector = sum(1 for r in records if r['engine'] == 'vector')
-
-    # 第 1 行：全部算子
+    # 全部算子
     draw_op_bars_h(ax_all, records, f'All Ops  ({n_all} ops)',
                    cum_starts, widths, ft, mt, sl,
                    filter_engine=None, show_xticklabels=False,
                    divider_time=divider_time, bar_height=bar_h)
-    # 第 2 行：Cube 算子
-    draw_op_bars_h(ax_cube, records, f'Cube Ops  ({n_cube} ops)',
-                   cum_starts, widths, ft, mt, sl,
-                   filter_engine='cube', show_xticklabels=False,
-                   divider_time=divider_time, bar_height=bar_h)
-    # 第 3 行：Vector 算子 + 名称标签
-    draw_op_bars_h(ax_vector, records, f'Vector Ops  ({n_vector} ops)',
-                   cum_starts, widths, ft, mt, sl,
-                   filter_engine='vector', show_xticklabels=True,
-                   divider_time=divider_time, bar_height=bar_h)
+    draw_utilization_lines(ax_util, records, cum_starts, widths,
+                           divider_time=divider_time,
+                           show_xticklabels=True)
 
     # ---- Expert 标注框 ----
     if expert_info is not None:
@@ -424,7 +466,6 @@ def plot_timeline(records, stats_text, stats, output_path, title,
         x_start = cum_starts[es]
         x_end   = cum_starts[ee] + widths[ee]
 
-        # 第 1 行加文字标注
         yl, yh = ax_all.get_ylim()
         rect = FancyBboxPatch(
             (x_start, yl), x_end - x_start, yh - yl,
@@ -441,16 +482,6 @@ def plot_timeline(records, stats_text, stats, output_path, title,
             bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='#E74C3C',
                       alpha=0.9, lw=0.8),
         )
-        # 其余 2 行只画边框。过滤后的 engine 行里，非当前 engine 的
-        # 时间段应保持空白，避免标注底色被误读为 mem_time。
-        for ax_sub in (ax_cube, ax_vector):
-            yl2, yh2 = ax_sub.get_ylim()
-            r2 = FancyBboxPatch(
-                (x_start, yl2), x_end - x_start, yh2 - yl2,
-                boxstyle='round,pad=0', linewidth=1.0,
-                edgecolor='#E74C3C', facecolor='none', alpha=0.9,
-            )
-            ax_sub.add_patch(r2)
 
     fig.suptitle(title, fontsize=13, y=0.995)
 
