@@ -441,13 +441,14 @@ def plot_timeline(records, stats_text, stats, output_path, title,
             bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='#E74C3C',
                       alpha=0.9, lw=0.8),
         )
-        # 其余 2 行也画半透明框
+        # 其余 2 行只画边框。过滤后的 engine 行里，非当前 engine 的
+        # 时间段应保持空白，避免标注底色被误读为 mem_time。
         for ax_sub in (ax_cube, ax_vector):
             yl2, yh2 = ax_sub.get_ylim()
             r2 = FancyBboxPatch(
                 (x_start, yl2), x_end - x_start, yh2 - yl2,
                 boxstyle='round,pad=0', linewidth=1.0,
-                edgecolor='#E74C3C', facecolor='#E74C3C', alpha=0.06,
+                edgecolor='#E74C3C', facecolor='none', alpha=0.9,
             )
             ax_sub.add_patch(r2)
 
