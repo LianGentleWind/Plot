@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.patches import Patch
 import os
+import re
 
 # ------------------------------
 # 全局样式设置
@@ -54,15 +55,27 @@ def format_seq_len(length):
         return str(int(length))
 
 
+def trailing_p_size(value):
+    match = re.search(r'_(\d+)P$', str(value))
+    return int(match.group(1)) if match else np.nan
+
+
+def hardware_type(value):
+    return re.sub(r'_\d+P$', '', str(value))
+
+
+df['supernode_size'] = df['chip'].map(trailing_p_size)
+df['supernode_size'] = df['supernode_size'].fillna(df['hardware_name'].map(trailing_p_size))
+df = df.dropna(subset=['supernode_size']).copy()
+df['supernode_size'] = df['supernode_size'].astype(int)
+df['hardware_type'] = df['hardware_name'].map(hardware_type)
+all_supernode_sizes = sorted(df['supernode_size'].unique())
+
+
 # 颜色映射
-chips = df['chip'].unique()
-base_colors = ['#4c72b0', '#ff7f0e', '#55a868', '#d62728', '#9467bd',
-               '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-if len(chips) > len(base_colors):
-    cmap = plt.cm.get_cmap('tab20', len(chips))
-    chip_color_map = {ch: cmap(i) for i, ch in enumerate(chips)}
-else:
-    chip_color_map = {ch: base_colors[i] for i, ch in enumerate(chips)}
+hardware_types = df['hardware_type'].dropna().unique()
+base_colors = ['#4c72b0', '#ff7f0e', '#55a868']
+hardware_color_map = {hw: base_colors[i % len(base_colors)] for i, hw in enumerate(hardware_types)}
 
 # 分组绘图
 group_cols = ['model', 'latency_constraint_ms', 'seq_len']
@@ -73,17 +86,17 @@ for (model, tpot, seq_len), group in grouped:
     seq_str = format_seq_len(seq_len)
     title = f"{model_name}@KV={seq_str},TPOT<={tpot}ms"
 
-    cards = sorted(group['num_cards'].unique())
-    n_cards = len(cards)
+    supernode_sizes = all_supernode_sizes
+    n_sizes = len(supernode_sizes)
 
-    fig, ax = plt.subplots(figsize=(max(12, n_cards * 0.6 + 2), 6))
+    fig, ax = plt.subplots(figsize=(max(9, n_sizes * 0.45 + 2), 6))
 
-    x = np.arange(n_cards)
-    present_chips = group['chip'].unique()
-    num_chip_types = len(present_chips)
+    x = np.arange(n_sizes)
+    present_hardware_types = group['hardware_type'].dropna().unique()
+    num_hardware_types = len(present_hardware_types)
 
-    # 动态柱宽：在一个刻度内，所有芯片柱子总宽度占90%，留10%空隙
-    width = 0.9 / num_chip_types
+    # 固定柱宽：不同图片或缺少硬件选型时，单根柱子的宽度保持一致
+    width = 0.25
 
     # 根据柱宽动态计算柱内数字字号，确保始终显示
     base_fontsize = 9
@@ -91,23 +104,24 @@ for (model, tpot, seq_len), group in grouped:
     # 当柱子变窄时字号按比例缩小
     text_fontsize = max(min_fontsize, base_fontsize * width / 0.15)
 
-    for i, chip in enumerate(present_chips):
-        chip_data = group[group['chip'] == chip].set_index('num_cards').reindex(cards)
-        compute = chip_data['compute_time_ratio'].fillna(0).values
-        memory = chip_data['memory_time_ratio'].fillna(0).values
-        comm = chip_data['comm_time_ratio'].fillna(0).values
+    for i, hw_type in enumerate(present_hardware_types):
+        hw_data = group[group['hardware_type'] == hw_type]
+        hw_data = hw_data.groupby('supernode_size')[ratio_cols].first().reindex(supernode_sizes)
+        compute = hw_data['compute_time_ratio'].fillna(0).values
+        memory = hw_data['memory_time_ratio'].fillna(0).values
+        comm = hw_data['comm_time_ratio'].fillna(0).values
 
-        offset = (i - (num_chip_types - 1) / 2) * width
+        offset = (i - (num_hardware_types - 1) / 2) * width
 
         ax.bar(x + offset, compute, width,
-               color=chip_color_map[chip], alpha=1.0, edgecolor='white')
+               color=hardware_color_map[hw_type], alpha=1.0, edgecolor='white')
         ax.bar(x + offset, memory, width, bottom=compute,
-               color=chip_color_map[chip], alpha=0.6, edgecolor='white')
+               color=hardware_color_map[hw_type], alpha=0.7, edgecolor='white')
         ax.bar(x + offset, comm, width, bottom=compute + memory,
-               color=chip_color_map[chip], alpha=0.8, edgecolor='white')
+               color=hardware_color_map[hw_type], alpha=0.4, edgecolor='white')
 
         # 始终标注数字，根据宽度自适应字号
-        for j in range(n_cards):
+        for j in range(n_sizes):
             c_val, m_val, k_val = compute[j], memory[j], comm[j]
             center_c = c_val / 2
             center_m = c_val + m_val / 2
@@ -128,33 +142,28 @@ for (model, tpot, seq_len), group in grouped:
 
     # 坐标轴
     ax.set_xticks(x)
-    ax.set_xticklabels([str(c) for c in cards], fontsize=14)
-    ax.set_xlabel('num_cards', fontsize=15)
+    ax.set_xticklabels([f'{size}P' for size in supernode_sizes], fontsize=14)
+    ax.set_xlabel('超节点规模', fontsize=15)
     ax.set_ylabel('时间占比 (%)', fontsize=15)
     ax.set_ylim(0, 120)
     ax.set_yticks(np.arange(0, 101, 20))
     ax.set_title(title, fontsize=17, pad=15)
 
     # ---- 图例 ----
-    chip_legend = [Patch(facecolor=chip_color_map[ch], edgecolor='white',
-                         label=ch) for ch in present_chips]
+    hardware_legend = [Patch(facecolor=hardware_color_map[hw], edgecolor='white',
+                             label=hw) for hw in present_hardware_types]
+    ratio_legend_color = hardware_color_map[present_hardware_types[0]]
     ratio_legend = [
-        Patch(facecolor='grey', alpha=1.0, label='计算占比'),
-        Patch(facecolor='grey', alpha=0.6, label='访存占比'),
-        Patch(facecolor='grey', alpha=0.8, label='通信占比')
+        Patch(facecolor=ratio_legend_color, alpha=1.0, label='计算占比'),
+        Patch(facecolor=ratio_legend_color, alpha=0.7, label='访存占比'),
+        Patch(facecolor=ratio_legend_color, alpha=0.4, label='通信占比')
     ]
 
-    # 芯片图例：芯片>4时每行显示4个，字号调小
-    max_cols_chip = 4
-    ncol_chip = num_chip_types if num_chip_types <= max_cols_chip else max_cols_chip
-    chip_fontsize = 9 if num_chip_types <= 4 else 8
-    chip_title_fontsize = 10 if num_chip_types <= 4 else 9
-
-    leg1 = ax.legend(handles=chip_legend, title='Chip',
+    leg1 = ax.legend(handles=hardware_legend, title='硬件选型',
                      loc='upper left',
                      bbox_to_anchor=(0.0, 1.0),
-                     ncol=ncol_chip,
-                     fontsize=chip_fontsize, title_fontsize=chip_title_fontsize,
+                     ncol=len(present_hardware_types),
+                     fontsize=10, title_fontsize=11,
                      framealpha=0.9, edgecolor='grey',
                      handlelength=1.2, handletextpad=0.5, labelspacing=0.3,
                      columnspacing=0.8)
