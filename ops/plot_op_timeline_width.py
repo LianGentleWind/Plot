@@ -176,10 +176,18 @@ def fmt_value(s):
 
 
 def build_stats_text(stats, sidecar_name, main_name):
-    lines = [f'Sidecar: {sidecar_name}', f'Main:    {main_name}', '']
+    header = [f'Sidecar: {sidecar_name}', f'Main:    {main_name}', '']
+    stat_lines = []
     for key, label in STATS_KEYS_ORDERED:
         if key in stats:
-            lines.append(f'  {label:<28} {fmt_value(stats[key])}')
+            stat_lines.append(f'  {label:<28} {fmt_value(stats[key])}')
+
+    mid = (len(stat_lines) + 1) // 2
+    lines = list(header)
+    for left, right in zip(stat_lines[:mid], stat_lines[mid:]):
+        lines.append(f'{left:<46} {right}')
+    if len(stat_lines[:mid]) > len(stat_lines[mid:]):
+        lines.append(stat_lines[mid - 1])
     return '\n'.join(lines)
 
 
@@ -308,15 +316,16 @@ def draw_op_bars_h(ax, records, subtitle, cum_starts, widths,
         ax.tick_params(axis='x', labelbottom=False)
 
 
-def draw_utilization_lines(ax, records, cum_starts, widths,
-                           divider_time=None, show_xticklabels=True):
-    """画 cube/vector 计算率折线图，与主时间线共享 X 轴。"""
+def draw_utilization_line(ax, records, cum_starts, widths, engine,
+                          color, divider_time=None,
+                          show_xticklabels=True):
+    """画单个 engine 的计算率阶梯线，与主时间线共享 X 轴。"""
     n = len(records)
     if n == 0:
         ax.text(0.5, 0.5, '(no ops)', ha='center', va='center',
                 transform=ax.transAxes, fontsize=10, color='#888')
         ax.set_yticks([])
-        ax.set_title('Compute Utilization', fontsize=11, pad=2)
+        ax.set_title(f'{engine} Compute Utilization', fontsize=10, pad=2)
         return
 
     total_width = cum_starts[-1] + widths[-1] if n > 0 else 1
@@ -324,27 +333,21 @@ def draw_utilization_lines(ax, records, cum_starts, widths,
     util = np.array([float(r.get('compute_utilization', 0) or 0)
                      for r in records])
     engines = [r['engine'] for r in records]
-    cube_util = np.array([util[i] if engines[i] == 'cube' else 0.0
-                          for i in range(n)])
-    vector_util = np.array([util[i] if engines[i] == 'vector' else 0.0
+    engine_util = np.array([util[i] if engines[i] == engine else 0.0
                             for i in range(n)])
 
     x_steps = np.repeat(np.r_[cum_starts, total_width], 2)[1:-1]
-    cube_steps = np.repeat(cube_util, 2)
-    vector_steps = np.repeat(vector_util, 2)
+    util_steps = np.repeat(engine_util, 2)
 
-    ax.plot(x_steps, cube_steps, color=BAR_COLORS['cube_compute'],
-            linewidth=1.0,
-            label='cube compute_utilization')
-    ax.plot(x_steps, vector_steps, color=BAR_COLORS['vector_compute'],
-            linewidth=1.0,
-            label='vector compute_utilization')
+    ax.plot(x_steps, util_steps, color=color, linewidth=2.2,
+            label=f'{engine} compute_utilization')
 
     ax.set_xlim(0, total_width)
-    ymax = max(1.0, float(max(cube_util.max(), vector_util.max())) * 1.05)
+    ymax = max(1.0, float(engine_util.max()) * 1.05)
     ax.set_ylim(0, ymax)
     ax.set_ylabel('utilization', fontsize=9)
-    ax.set_title('Compute Utilization', fontsize=11, pad=2)
+    ax.set_title(f'{engine.capitalize()} Compute Utilization',
+                 fontsize=10, pad=2)
     ax.grid(axis='y', linestyle=':', linewidth=0.6, alpha=0.5)
     ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
 
@@ -435,16 +438,18 @@ def plot_timeline(records, stats_text, stats, output_path, title,
             divider_time = cum_starts[first_mlp]
 
     # ---- 画布布局 ----
-    fig = plt.figure(figsize=(22, 16))
-    outer_gs = fig.add_gridspec(3, 1, height_ratios=[2.1, 1.0, 1.2],
-                                hspace=0.18)
+    fig = plt.figure(figsize=(22, 12))
+    outer_gs = fig.add_gridspec(4, 1,
+                                height_ratios=[2.0, 0.55, 0.55, 1.0],
+                                hspace=0.16)
 
-    # 上部：单行时间线 + 计算率折线图
+    # 上部：单行时间线 + cube/vector 计算率折线图
     ax_all = fig.add_subplot(outer_gs[0])
-    ax_util = fig.add_subplot(outer_gs[1], sharex=ax_all)
+    ax_cube_util = fig.add_subplot(outer_gs[1], sharex=ax_all)
+    ax_vector_util = fig.add_subplot(outer_gs[2], sharex=ax_all)
 
     # 下部：文本 + 饼图
-    bottom_gs = outer_gs[2].subgridspec(1, 2, width_ratios=[1.5, 1.0],
+    bottom_gs = outer_gs[3].subgridspec(1, 2, width_ratios=[1.5, 1.0],
                                          wspace=0.18)
     ax_text = fig.add_subplot(bottom_gs[0])
     ax_pie  = fig.add_subplot(bottom_gs[1])
@@ -456,9 +461,14 @@ def plot_timeline(records, stats_text, stats, output_path, title,
                    cum_starts, widths, ft, mt, sl,
                    filter_engine=None, show_xticklabels=False,
                    divider_time=divider_time, bar_height=bar_h)
-    draw_utilization_lines(ax_util, records, cum_starts, widths,
-                           divider_time=divider_time,
-                           show_xticklabels=True)
+    draw_utilization_line(ax_cube_util, records, cum_starts, widths,
+                          'cube', BAR_COLORS['cube_compute'],
+                          divider_time=divider_time,
+                          show_xticklabels=False)
+    draw_utilization_line(ax_vector_util, records, cum_starts, widths,
+                          'vector', BAR_COLORS['vector_compute'],
+                          divider_time=divider_time,
+                          show_xticklabels=True)
 
     # ---- Expert 标注框 ----
     if expert_info is not None:
@@ -488,7 +498,8 @@ def plot_timeline(records, stats_text, stats, output_path, title,
     # ---- 统计文本 ----
     ax_text.axis('off')
     ax_text.text(0.0, 1.0, stats_text, transform=ax_text.transAxes,
-                 fontfamily='monospace', fontsize=10, verticalalignment='top')
+                 fontfamily='monospace', fontsize=8.5,
+                 verticalalignment='top')
 
     # ---- 饼图 ----
     draw_pie(ax_pie, stats or {})
