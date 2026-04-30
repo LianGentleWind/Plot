@@ -44,6 +44,15 @@ for col in ratio_cols:
     if not has_percent and df[col].max() < 1.1:
         df[col] = df[col] * 100
 
+# 三部分总和不足 100% 时，按原比例归一化到 100%
+ratio_sum = df[ratio_cols].sum(axis=1)
+normalize_mask = (ratio_sum > 0) & (ratio_sum < 100)
+df.loc[normalize_mask, ratio_cols] = (
+    df.loc[normalize_mask, ratio_cols]
+    .div(ratio_sum[normalize_mask], axis=0)
+    .mul(100)
+)
+
 
 # 序列长度格式化（按1024进制，整数显示）
 def format_seq_len(length):
